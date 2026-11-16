@@ -1,0 +1,12 @@
+.gitignore
+LICENSE
+Manifest.txt
+README.md
+af-source-md.gemspec
+lib/af_source_md.rb
+lib/af_source_md/registry.rb
+lib/af_source_md/source_document.rb
+lib/af_source_md/source_identity.rb
+lib/af_source_md/source_register.rb
+lib/af_source_md/source_resolver.rb
+test/mechanics_test.rb
