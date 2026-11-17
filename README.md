@@ -16,8 +16,36 @@ registry_path: nil, page_marker_offset: nil)` appends one explicit mapping to an
 **existing** registry. It returns a Result with registry path, identity, filename,
 before/after registry hashes and the supplied offset. Candidate validation,
 prior-byte comparison, comments, permissions and owned temporary cleanup remain
-part of the append contract. The compare/rename sequence does not provide locking
-or a cross-store transaction.
+part of the append contract. Registration shares the source-root advisory
+writer lock with guarded operations when both use this owner and the same
+physical source root.
+
+### Guarded source writes
+
+`SourceOperation.publish!(source_root:) { handoff }` accepts a
+`af-source-md-operation/v0.1` handoff supplied by the caller after it verifies
+the operator's decision, QA and editorial context. The block runs under the
+source-root writer lock. The handoff binds the exact owner, library and root,
+operation and revision, action, explicit source ID and edition, placement path
+and single-file mapping, candidate, prior registry and correction source file
+bindings, decision and supporting context. Regular-file bindings use canonical
+absolute path, byte size, SHA-256 and mode. The owner validates those bindings,
+the v0.1 mappings and physical store paths. The pipeline ingest runbook defines
+the operator decision interface.
+
+Publication links an operation record, exact Markdown and a new registry
+generation, in that order. The registry is the commit point. The old registry,
+prior mappings and old source paths remain available for frozen consumers. The
+new registry carries the previous mode, and an exact pre-existing Markdown file
+keeps its bytes and mode. Corrections add an explicit new source identity.
+Readers select the new registry path from the returned bindings.
+
+A retry under the same binding checks the operation record and the already
+published files, then links only missing outputs. Conflicts refuse without
+replacing a destination. Normal error handling cleans up temporaries owned by
+that invocation. A process killed while staging can leave a hidden temporary.
+The lock coordinates writers using this owner and the same physical source
+root. External writers need to honor the same store boundary.
 
 `SourceResolver.new(source_root:, registry_path:).resolve(request)` accepts an
 object exposing `source_book`, `start_page` and `end_page`. Its Resolution supplies
@@ -42,7 +70,7 @@ Unexpected Ruby argument/filesystem errors retain their native type except for
 the established registration file-operation translation. Adapters retain caller
 result types, errors, sequencing and policy. No source registration or raw read
 grants QA/editorial approval, replay qualification, storage initialization,
-approved correction or publication authority.
+or downstream publication authority.
 
 Pipeline and public scorer adapters support an authoritative absolute
 `AF_SOURCE_MD_ROOT` pointing to this tree, or an ordinary installed
