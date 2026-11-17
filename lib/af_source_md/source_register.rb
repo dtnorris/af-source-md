@@ -30,34 +30,37 @@ module AFSourceMD
     # Append one explicit source mapping; return Result, or raise ValidationError without publishing an invalid candidate.
     def register!
       root = Registry.expanded_source_root(@source_root)
-      source_id = Registry.nonblank_string!(@source_id, "source_id")
+      Registry.with_write_lock(root) { register_under_lock!(root) }
+    rescue SystemCallError => e
+      raise ValidationError, "source-register file operation failed: #{e.message}"
+    end
+
+    # Validate a new single-line source identity; return it or raise ValidationError.
+    def self.validate_source_id!(value)
+      source_id = Registry.nonblank_string!(value, "source_id")
       raise ValidationError, "source_id must be a single line" if source_id.match?(/[\r\n]/)
-      source_id = SourceIdentity.validate!(source_id, error_class: ValidationError)
+      SourceIdentity.validate!(source_id, error_class: ValidationError)
+    end
+
+    private
+
+    # Publish the legacy append under the shared source-root lock; return Result or raise ValidationError.
+    def register_under_lock!(root)
+      source_id = self.class.validate_source_id!(@source_id)
 
       markdown = Registry.existing_file!(@markdown_path, "Markdown source")
       relative = Registry.relative_under_root!(root, markdown, "Markdown source")
       raise ValidationError, "Markdown source must end in .md: #{relative}" unless File.extname(relative).downcase == ".md"
-      validate_offset!(@page_marker_offset)
+      self.class.validate_offset!(@page_marker_offset)
 
       registry = Registry.registry_context(root, @registry_path)
       registry_path = registry.fetch("path")
       sources = registry.fetch("sources")
-      if sources.key?(source_id)
-        raise ValidationError, "Source registry already contains source identity #{source_id.inspect}"
-      end
-
-      existing_refs = sources.filter_map do |existing_id, entry|
-        normalized = Registry.normalize_registry_entry(existing_id, entry)
-        existing_id if normalized.fetch(:files).include?(relative)
-      end
-      unless existing_refs.empty?
-        raise ValidationError,
-              "Markdown file #{relative.inspect} is already registered to: #{existing_refs.sort.join(', ')}"
-      end
+      self.class.validate_unused_mapping!(sources, source_id, relative)
 
       original = File.binread(registry_path)
       before_sha = Digest::SHA256.hexdigest(original)
-      candidate = append_entry(original, source_id, relative, @page_marker_offset, empty_sources: sources.empty?)
+      candidate = self.class.append_entry(original, source_id, relative, @page_marker_offset, empty_sources: sources.empty?)
       mode = File.stat(registry_path).mode & 0o777
       temp_path = nil
 
@@ -100,14 +103,30 @@ module AFSourceMD
         registry_sha256_after: after_sha,
         page_marker_offset: @page_marker_offset
       )
-    rescue SystemCallError => e
-      raise ValidationError, "source-register file operation failed: #{e.message}"
     end
 
-    private
+    # Refuse occupied IDs or mappings. With a store root, compare normalized
+    # paths for guarded writes. Return nil for an unused pair or raise ValidationError.
+    def self.validate_unused_mapping!(sources, source_id, relative, root: nil)
+      if sources.key?(source_id)
+        raise ValidationError, "Source registry already contains source identity #{source_id.inspect}"
+      end
+
+      existing_refs = sources.filter_map do |existing_id, entry|
+        files = Registry.normalize_registry_entry(existing_id, entry).fetch(:files)
+        if root
+          files = files.map { |filename| Registry.relative_under_root!(root, File.expand_path(filename, root), "Markdown source") }
+        end
+        existing_id if files.include?(relative)
+      end
+      unless existing_refs.empty?
+        raise ValidationError,
+              "Markdown file #{relative.inspect} is already registered to: #{existing_refs.sort.join(', ')}"
+      end
+    end
 
     # Validate the supplied explicitly signed offset; return nil or raise ValidationError.
-    def validate_offset!(value)
+    def self.validate_offset!(value)
       return if value.nil?
       unless value.is_a?(String) && /\A[+-]\d+\z/.match?(value)
         raise ValidationError, "--page-marker-offset must be an explicitly signed integer such as +3 or -1"
@@ -119,7 +138,7 @@ module AFSourceMD
     # `sources: {}` header without reserializing comments or existing mappings;
     # unsupported layouts still face candidate validation.
     # Raises ValidationError when the original bytes are not valid UTF-8.
-    def append_entry(original, source_id, relative, offset, empty_sources:)
+    def self.append_entry(original, source_id, relative, offset, empty_sources:)
       content = original.dup.force_encoding(Encoding::UTF_8)
       unless content.valid_encoding?
         raise ValidationError, "source registry must be valid UTF-8"

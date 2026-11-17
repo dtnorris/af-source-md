@@ -32,5 +32,6 @@ end
 require_relative "af_source_md/source_identity"
 require_relative "af_source_md/registry"
 require_relative "af_source_md/source_register"
+require_relative "af_source_md/source_operation"
 require_relative "af_source_md/source_resolver"
 require_relative "af_source_md/source_document"

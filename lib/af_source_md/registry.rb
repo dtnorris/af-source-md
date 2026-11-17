@@ -36,7 +36,20 @@ module AFSourceMD
              end
       path = existing_file!(path, "source registry")
       relative = relative_under_root!(root, path, "source registry")
-      raw = load_yaml_mapping(path, "source registry")
+      validate_registry!(load_yaml_mapping(path, "source registry")).merge("path" => path, "relative_path" => relative)
+    end
+
+    # Validate a v0.1 registry snapshot from exact bytes; return the parsed envelope or raise ValidationError.
+    def parse_registry(bytes, path)
+      raw = YAML.safe_load(bytes, permitted_classes: [Date, Time], aliases: false) || {}
+      validate_registry!(raw)
+    rescue Psych::Exception => error
+      raise ValidationError, "Invalid YAML in source registry #{path}: #{error.message}"
+    end
+
+    # Validate the loaded envelope and source keys; return the unmodified mapping or raise ValidationError.
+    def validate_registry!(raw)
+      mapping!(raw, "source registry")
       exact_keys!(raw, %w[schema_version sources], "source registry")
       require_keys!(raw, %w[schema_version sources], "source registry")
       unless raw["schema_version"] == SOURCE_REGISTRY_SCHEMA_VERSION
@@ -47,7 +60,16 @@ module AFSourceMD
       raw["sources"].each_key do |key|
         nonblank_string!(key, "source registry source key")
       end
-      raw.merge("path" => path, "relative_path" => relative)
+      raw
+    end
+
+    # Serialize cooperating writers on the physical store directory and return the block's result.
+    # The OS releases the advisory lock on close or process exit. Filesystem failures propagate.
+    def with_write_lock(root)
+      File.open(root, File::RDONLY) do |directory|
+        raise ValidationError, "Could not lock source root: #{root}" unless directory.flock(File::LOCK_EX)
+        yield
+      end
     end
 
     # Validate a pipeline mapping; return files/segments with ordered nonoverlap checks or raise ValidationError.
