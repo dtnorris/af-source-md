@@ -6,6 +6,14 @@ on the Ruby load path. Dependencies are Ruby's date, digest, fileutils, json,
 pathname, tempfile, time and yaml libraries. Neither pipeline nor scorer is a
 runtime dependency. `API_VERSION` is `af-source-md/v0.1`.
 
+To read a printed page range, give `AFSourceMD::SourceResolver` the source
+directory and its v0.1 registry. Resolve a request with the source-book name
+and page bounds, open the returned path with `AFSourceMD::SourceDocument`,
+and pass the same bounds and the resolved `page_marker_offset` to `extract`.
+The result’s `text` contains the selected Markdown bytes, including its markers.
+The [standalone example](test/mechanics_test.rb) registers a synthetic source
+and checks the exact bytes returned for two pages.
+
 Run the content-free standalone conformance test with
 `ruby -Ilib test/mechanics_test.rb` (Minitest is a test-only dependency).
 
